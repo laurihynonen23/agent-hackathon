@@ -273,6 +273,32 @@ def build_index_html() -> str:
       font-size: 0.77rem;
       line-height: 1.45;
     }
+    .control-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+    .inline-check {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+    .inline-check input {
+      margin: 0;
+    }
+    .ghost-btn {
+      border: 1px solid rgba(24, 22, 26, 0.12);
+      background: rgba(255,255,255,0.7);
+      color: var(--ink);
+      padding: 9px 12px;
+      font-size: 0.82rem;
+    }
     .button-row {
       display: flex;
       gap: 10px;
@@ -717,6 +743,7 @@ def build_index_html() -> str:
             <select id="aiModelPreset">
               <option value="">OpenAI default (`gpt-5.2`)</option>
               <option value="gpt-5.2">gpt-5.2</option>
+              <option value="gpt-5.4">gpt-5.4 (if enabled on your account)</option>
               <option value="gpt-5.1">gpt-5.1</option>
               <option value="gpt-4.1">gpt-4.1</option>
               <option value="gpt-4o">gpt-4o</option>
@@ -731,6 +758,13 @@ def build_index_html() -> str:
             <label for="aiApiKey">OpenAI API key</label>
             <input id="aiApiKey" type="password" placeholder="Paste a key for this run only" autocomplete="off">
             <span class="control-note">Sent only with this run. The key stays in memory and is not written into reports or debug artifacts.</span>
+            <div class="control-actions">
+              <label class="inline-check" for="rememberAiKey">
+                <input id="rememberAiKey" type="checkbox">
+                Remember in this browser
+              </label>
+              <button id="clearSavedAiKey" type="button" class="ghost-btn">Clear saved key</button>
+            </div>
           </div>
         </div>
 
@@ -855,6 +889,9 @@ def build_index_html() -> str:
     let selectedFiles = [];
     let pollTimer = null;
     let currentJobId = null;
+    const savedAiKeyStorageKey = "firstMateOpenAiKey";
+    const savedAiModelPresetKey = "firstMateAiModelPreset";
+    const savedAiModelCustomKey = "firstMateAiModelCustom";
 
     const fileInput = document.getElementById("fileInput");
     const fileList = document.getElementById("fileList");
@@ -865,6 +902,8 @@ def build_index_html() -> str:
     const aiModelCustom = document.getElementById("aiModelCustom");
     const customModelWrap = document.getElementById("customModelWrap");
     const aiApiKey = document.getElementById("aiApiKey");
+    const rememberAiKey = document.getElementById("rememberAiKey");
+    const clearSavedAiKey = document.getElementById("clearSavedAiKey");
     const statusPill = document.getElementById("runStatusPill");
     const statusMeta = document.getElementById("statusMeta");
 
@@ -900,6 +939,39 @@ def build_index_html() -> str:
       if (!isCustom) {
         aiModelCustom.value = "";
       }
+    }
+
+    function persistAiPreferences() {
+      localStorage.setItem(savedAiModelPresetKey, aiModelPreset.value);
+      if (aiModelPreset.value === "custom" && aiModelCustom.value.trim()) {
+        localStorage.setItem(savedAiModelCustomKey, aiModelCustom.value.trim());
+      } else {
+        localStorage.removeItem(savedAiModelCustomKey);
+      }
+
+      if (rememberAiKey.checked && aiApiKey.value.trim()) {
+        localStorage.setItem(savedAiKeyStorageKey, aiApiKey.value.trim());
+      } else {
+        localStorage.removeItem(savedAiKeyStorageKey);
+      }
+    }
+
+    function restoreAiPreferences() {
+      const savedModelPreset = localStorage.getItem(savedAiModelPresetKey);
+      const presetValues = Array.from(aiModelPreset.options).map((option) => option.value);
+      if (savedModelPreset && presetValues.includes(savedModelPreset)) {
+        aiModelPreset.value = savedModelPreset;
+      }
+      if (aiModelPreset.value === "custom") {
+        aiModelCustom.value = localStorage.getItem(savedAiModelCustomKey) || "";
+      }
+
+      const savedKey = localStorage.getItem(savedAiKeyStorageKey);
+      if (savedKey) {
+        aiApiKey.value = savedKey;
+        rememberAiKey.checked = true;
+      }
+      updateModelControl();
     }
 
     dropzone.addEventListener("click", () => fileInput.click());
@@ -1304,8 +1376,19 @@ def build_index_html() -> str:
 
     runUploads.addEventListener("click", () => createJob(false));
     runSample.addEventListener("click", () => createJob(true));
-    aiModelPreset.addEventListener("change", updateModelControl);
-    updateModelControl();
+    aiModelPreset.addEventListener("change", () => {
+      updateModelControl();
+      persistAiPreferences();
+    });
+    aiModelCustom.addEventListener("input", persistAiPreferences);
+    aiApiKey.addEventListener("input", persistAiPreferences);
+    rememberAiKey.addEventListener("change", persistAiPreferences);
+    clearSavedAiKey.addEventListener("click", () => {
+      localStorage.removeItem(savedAiKeyStorageKey);
+      aiApiKey.value = "";
+      rememberAiKey.checked = false;
+    });
+    restoreAiPreferences();
     renderStageGrid([]);
   </script>
 </body>

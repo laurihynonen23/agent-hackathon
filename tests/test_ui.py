@@ -9,6 +9,8 @@ def test_ui_html_exposes_transparent_process_copy():
     assert "AI resolver" in html
     assert "OpenAI API key" in html
     assert "gpt-5.2" in html
+    assert "gpt-5.4" in html
+    assert "Remember in this browser" in html
 
 
 def test_ui_stage_order_matches_pipeline_expectations():

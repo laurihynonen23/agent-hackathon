@@ -5,12 +5,18 @@ import io
 import json
 import os
 import re
+import ssl
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib import error, request
 
 from PIL import Image
+
+try:
+    import certifi
+except ImportError:  # pragma: no cover - optional dependency in runtime bootstrap
+    certifi = None
 
 from .types import AiDecision, AiSettings, BBox, DocumentPage, MaterialSpec
 
@@ -95,7 +101,8 @@ class HybridAiResolver:
         req.add_header("Content-Type", "application/json")
         for key, value in (headers or {}).items():
             req.add_header(key, value)
-        with request.urlopen(req, timeout=timeout) as response:
+        context = ssl.create_default_context(cafile=certifi.where()) if certifi is not None else None
+        with request.urlopen(req, timeout=timeout, context=context) as response:
             raw = response.read().decode("utf-8")
         return json.loads(raw) if raw else {}
 
