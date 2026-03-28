@@ -27,6 +27,7 @@ def test_cli_smoke(tmp_path: Path):
     assert (debug_dir / "classification.json").exists()
     assert (debug_dir / "measurements.json").exists()
     assert (debug_dir / "geometry.json").exists()
+    assert (debug_dir / "ai_decisions.json").exists()
     assert (overlays_dir / "plan_overlay.png").exists()
     assert (output_dir / "report.md").exists()
 

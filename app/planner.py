@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from .ai import HybridAiResolver
 from .classify import classify_pages
 from .extract_dimensions import extract_measurements, measurement_summary
 from .geometry import reconstruct_geometry
@@ -10,7 +11,7 @@ from .ingest import ingest_documents
 from .materials import extract_material_quantities
 from .openings import extract_openings
 from .report import write_json, write_overlays, write_report
-from .types import ConfidenceScores, PipelineArtifacts, Results
+from .types import AiSettings, ConfidenceScores, PipelineArtifacts, Results
 from .validate import validate_takeoff
 
 
@@ -40,6 +41,9 @@ def run_pipeline(
     output_dir: Path,
     render_dpi: int = 200,
     ocr_mode: str = "auto",
+    ai_mode: str = "auto",
+    ai_model: str | None = None,
+    ai_base_url: str | None = None,
     report_format: str = "md",
     progress_callback: ProgressCallback | None = None,
 ) -> PipelineArtifacts:
@@ -49,6 +53,7 @@ def run_pipeline(
     output_dir.mkdir(parents=True, exist_ok=True)
     debug_dir = output_dir / "debug"
     debug_dir.mkdir(parents=True, exist_ok=True)
+    ai_resolver = HybridAiResolver(AiSettings(mode=ai_mode, model=ai_model, base_url=ai_base_url))
 
     _emit(progress_callback, "ingest", "running", "Loading PDFs and extracting text/vector data.")
     pages = ingest_documents(input_dir=input_dir, output_dir=output_dir, render_dpi=render_dpi, ocr_mode=ocr_mode)
@@ -97,7 +102,12 @@ def run_pipeline(
     )
 
     _emit(progress_callback, "geometry", "running", "Reconstructing footprint and facade geometry.")
-    footprint, facades, geometry_assumptions, geometry_warnings = reconstruct_geometry(pages, classifications, measurements)
+    footprint, facades, geometry_assumptions, geometry_warnings = reconstruct_geometry(
+        pages,
+        classifications,
+        measurements,
+        ai_resolver=ai_resolver,
+    )
     _emit(
         progress_callback,
         "geometry",
@@ -117,6 +127,7 @@ def run_pipeline(
                 }
                 for facade in facades
             ],
+            "ai_decisions": [decision.model_dump(mode="json") for decision in ai_resolver.decisions if decision.decision_type in {"plan_region", "wall_height"}],
             "warnings": geometry_warnings,
         },
     )
@@ -141,6 +152,7 @@ def run_pipeline(
         facades=facades,
         openings=openings,
         measurements=measurements,
+        ai_resolver=ai_resolver,
     )
     _emit(
         progress_callback,
@@ -150,6 +162,7 @@ def run_pipeline(
         {
             "specs": {code: spec.description for code, spec in material_specs.items()},
             "quantities": {code: quantity.model_dump(mode="json") for code, quantity in cladding_by_type.items()},
+            "ai_decisions": [decision.model_dump(mode="json") for decision in ai_resolver.decisions if decision.decision_type == "primary_material"],
             "warnings": material_warnings,
         },
     )
@@ -210,6 +223,7 @@ def run_pipeline(
         material_specs=material_specs,
         validation=validation,
         results=results,
+        ai_decisions=ai_resolver.decisions,
     )
 
     write_json(debug_dir / "classification.json", [item.model_dump(mode="json") for item in classifications])
@@ -235,6 +249,7 @@ def run_pipeline(
         },
     )
     write_json(debug_dir / "validation.json", validation.model_dump(mode="json"))
+    write_json(debug_dir / "ai_decisions.json", [decision.model_dump(mode="json") for decision in ai_resolver.decisions])
     write_json(output_dir / "results.json", results.model_dump(mode="json"))
 
     _emit(progress_callback, "report", "running", "Rendering report and annotated overlays.")

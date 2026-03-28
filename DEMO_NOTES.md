@@ -2,15 +2,15 @@
 
 ## One-line pitch
 
-This is a local-first estimator agent for house drawing PDFs that uses deterministic PDF extraction, geometry reconstruction, and explicit validation instead of asking an LLM to "read the blueprint."
+This is a local-first estimator agent for house drawing PDFs that uses deterministic PDF extraction and geometry for the math, plus an optional bounded AI resolver for ambiguous semantic decisions.
 
 ## What to emphasize first
 
 Say this early:
 
 1. The biggest design decision was to avoid a pure LLM blueprint-reader.
-2. The agent is an orchestrator over deterministic tools: PDF text/vector extraction, geometry, material parsing, and validation.
-3. Every stage leaves an audit trail: debug JSON, overlays, assumptions, warnings, and confidence.
+2. The agent is hybrid: deterministic for extraction and math, AI only for ambiguity resolution.
+3. Every stage leaves an audit trail: debug JSON, overlays, AI decisions, assumptions, warnings, and confidence.
 
 That framing hits the rubric directly:
 
@@ -23,7 +23,7 @@ That framing hits the rubric directly:
 
 ### 1. Problem framing: 15 seconds
 
-"The challenge is to estimate perimeter, wall area, and cladding quantities from architectural PDFs. The risky way is to ask an LLM to interpret the drawings directly. I chose the opposite: use deterministic extraction wherever possible and reserve 'agent' behavior for orchestration, fallback selection, and transparent reporting."
+"The challenge is to estimate perimeter, wall area, and cladding quantities from architectural PDFs. The risky way is to ask an LLM to interpret the drawings directly. I chose a hybrid design: deterministic extraction and geometry for the quantities, and AI only where the drawings are semantically ambiguous."
 
 ### 2. Show the trigger: 10 seconds
 
@@ -35,7 +35,7 @@ Open the UI and say:
 
 Point at the stage list and say:
 
-"The agent runs a fixed but inspectable workflow: ingest, classify, extract, geometry, openings, materials, validate, and report. This is intentionally not a black box. Every stage emits intermediate state and metrics."
+"The agent runs a fixed but inspectable workflow: ingest, classify, extract, geometry, openings, materials, validate, and report. Inside that flow, AI can choose things like the correct plan subview, the right wall-height marker, or the dominant cladding code. This is intentionally not a black box. Every stage emits intermediate state and metrics."
 
 ### 4. Show one or two artifacts: 20 seconds
 
@@ -45,17 +45,17 @@ Open overlays or debug JSON and say:
 
 ### 5. Show the result and confidence: 15 seconds
 
-"The final output is not just a number. It also includes assumptions, warnings, and confidence split into geometry, openings, and materials. That matters because drawings are messy and a reliable estimator should expose uncertainty rather than invent certainty."
+"The final output is not just a number. It also includes AI decisions, assumptions, warnings, and confidence split into geometry, openings, and materials. That matters because drawings are messy and a reliable estimator should expose uncertainty rather than invent certainty."
 
 ### 6. Close with design tradeoff: 10 seconds
 
-"So the core idea is: deterministic extraction first, explicit validation second, and transparent agent orchestration around it."
+"So the core idea is: deterministic extraction first, bounded AI for ambiguity resolution second, and explicit validation throughout."
 
 ## 3-minute demo structure
 
 ### Part 1: Trigger and pipeline
 
-"The user drops PDFs into the UI. The UI stores them locally and starts a pipeline job. The planner is the agentic layer: it decides the stage order and collects intermediate artifacts."
+"The user drops PDFs into the UI. The UI stores them locally and starts a pipeline job. The planner is the agentic layer: it decides the stage order, invokes the optional AI resolver where useful, and collects intermediate artifacts."
 
 Reference:
 
@@ -101,7 +101,7 @@ Key point:
 
 ### Part 5: Geometry reconstruction
 
-"Geometry is reconstructed from plan dimensions. For the sample set, the key fix was summing the outer dimension chains instead of accidentally using inner spans. That gives the correct perimeter. Facade areas then use plan-derived widths and repeated wall-height markers from section and elevation sheets."
+"Geometry is reconstructed from plan dimensions. For the sample set, the key fix was summing the outer dimension chains instead of accidentally using inner spans. That gives the correct perimeter. The optional AI resolver can choose which plan subview is the real footprint source when a page contains both `POHJA` and `PARVEN POHJA`. Facade areas then use plan-derived widths and repeated wall-height markers from section and elevation sheets."
 
 Reference:
 
@@ -113,7 +113,7 @@ Key point:
 
 ### Part 6: Openings and materials
 
-"Openings are detected from elevation vector boxes first, with raster fallback. Materials are parsed from the legend and section notes. For the sample set, the section note overrides ambiguous elevation segmentation and drives the board takeoff."
+"Openings are detected from elevation vector boxes first, with raster fallback. Materials are parsed from the legend and section notes. The optional AI resolver can choose the dominant cladding code when the legend and facade labeling disagree. For the sample set, the section note drives the board takeoff."
 
 Reference:
 
@@ -126,7 +126,7 @@ Key point:
 
 ### Part 7: Validation and reporting
 
-"We cross-check the geometry against section level markers, evaluate opening coverage, evaluate material coverage, compute confidence, and then write results, report, debug JSON, and overlays."
+"We cross-check the geometry against section level markers, evaluate opening coverage, evaluate material coverage, compute confidence, and then write results, report, debug JSON, AI decisions, and overlays."
 
 Reference:
 
@@ -149,6 +149,7 @@ Use this exact structure if they ask "where is the agent":
 
 - `run_pipeline()` is the planner
 - it sequences the stages and emits progress events
+- it invokes the optional AI resolver only for ambiguous choices
 
 ### Tool calls / actions
 
@@ -156,11 +157,12 @@ Use this exact structure if they ask "where is the agent":
 - regex parsing for dimensions and materials
 - geometry reconstruction from dimension chains
 - vector-first opening detection with raster fallback
+- optional model calls for ambiguous decisions
 - PIL overlays and JSON/Markdown report writing
 
 ### State / memory
 
-- `DocumentPage`, `MeasurementStore`, `FootprintModel`, `FacadeModel`, `Opening`, `CladdingRegion`
+- `DocumentPage`, `MeasurementStore`, `FootprintModel`, `FacadeModel`, `Opening`, `CladdingRegion`, `AiDecision`
 - all explicit Pydantic models
 - persisted debug artifacts in `out/debug/*.json`
 - UI job state in memory for the current run
@@ -178,7 +180,7 @@ Use this exact structure if they ask "where is the agent":
 
 Important nuance:
 
-"It is an agentic system, but not an LLM-dependent agent. That was deliberate."
+"It is an agentic system, but the LLM is bounded. AI chooses among candidates; deterministic code still performs the actual measurement math."
 
 ## The strongest design choices to defend
 
@@ -208,11 +210,11 @@ Do not hide them. Frame them as conscious scope choices.
 
 ### "Why not just use GPT-4 or another LLM to read the drawings?"
 
-"Because the challenge is mostly geometry and structured notation. Deterministic extraction is more reliable, more local-first, cheaper, and easier to debug. I would only use an LLM as a fallback explainer or classifier, not as the primary estimator."
+"Because the challenge is mostly geometry and structured notation. Deterministic extraction is more reliable, more local-first, cheaper, and easier to debug. So I only use AI where the drawings become semantically ambiguous, not for the arithmetic itself."
 
 ### "What makes this an agent rather than a script?"
 
-"The orchestrator manages a staged workflow, chooses fallback paths, keeps explicit working state, validates consistency across stages, and surfaces confidence and warnings. It behaves like a constrained specialist agent rather than a one-shot script."
+"The orchestrator manages a staged workflow, chooses fallback paths, keeps explicit working state, invokes AI only for ambiguous choices, validates consistency across stages, and surfaces confidence and warnings. It behaves like a constrained specialist agent rather than a one-shot script."
 
 ### "What is the memory?"
 

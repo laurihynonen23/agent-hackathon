@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from collections import defaultdict, Counter
-import re
+from typing import Any
 
 import numpy as np
 from shapely.geometry import Polygon
 from PIL import Image
 
+from .ai import CandidateRegion, HybridAiResolver
 from .extract_dimensions import measurements_for_page
 from .extract_text import uppercase_normalized
-from .types import BBox, ClassificationResult, DocumentPage, FacadeModel, FootprintModel, MeasurementStore, Point2D
+from .types import BBox, ClassificationResult, DocumentPage, FacadeModel, FootprintModel, MeasurementStore, Point2D, TextSpan
 
 
 def _page_for_role(
@@ -77,32 +78,131 @@ def _detect_split_boundary_from_raster(page: DocumentPage) -> float | None:
     return midpoint_px * page.width_pt / image.width
 
 
-def detect_primary_plan_region(page: DocumentPage) -> BBox:
+def _span_line_text(page: DocumentPage, span: TextSpan) -> str:
+    line_spans = [item for item in page.text_spans if item.block_no == span.block_no and item.line_no == span.line_no]
+    line_spans.sort(key=lambda item: item.word_no)
+    return " ".join(item.text for item in line_spans)
+
+
+def _plan_region_candidates(page: DocumentPage) -> tuple[list[CandidateRegion], tuple[str, float] | None]:
     poja_spans = [span for span in page.text_spans if uppercase_normalized(span.text) == "POHJA"]
     parvi_spans = [span for span in page.text_spans if uppercase_normalized(span.text) == "PARVEN"]
     split_boundary = _detect_split_boundary(page)
-
-    if poja_spans and split_boundary is not None:
-        main_anchor = min(poja_spans, key=lambda span: span.bbox.x0)
-        if main_anchor.bbox.cx < split_boundary:
-            return BBox(x0=0.0, y0=0.0, x1=split_boundary, y1=page.height_pt)
-        return BBox(x0=split_boundary, y0=0.0, x1=page.width_pt, y1=page.height_pt)
-
-    if poja_spans:
+    raster_boundary = None
+    if split_boundary is None and poja_spans:
         raster_boundary = _detect_split_boundary_from_raster(page)
-        if raster_boundary is not None:
-            main_anchor = min(poja_spans, key=lambda span: span.bbox.x0)
-            if main_anchor.bbox.cx < raster_boundary:
-                return BBox(x0=0.0, y0=0.0, x1=raster_boundary, y1=page.height_pt)
-            return BBox(x0=raster_boundary, y0=0.0, x1=page.width_pt, y1=page.height_pt)
+    split_spec: tuple[str, float] | None = None
+    if split_boundary is not None:
+        split_spec = ("vertical", split_boundary)
+    elif raster_boundary is not None:
+        split_spec = ("vertical", raster_boundary)
+    elif poja_spans and parvi_spans:
+        main_anchor = min(poja_spans, key=lambda span: span.bbox.cx)
+        loft_anchor = max(parvi_spans, key=lambda span: span.bbox.cx)
+        if abs(main_anchor.bbox.cy - loft_anchor.bbox.cy) > abs(main_anchor.bbox.cx - loft_anchor.bbox.cx):
+            split_spec = ("horizontal", (main_anchor.bbox.cy + loft_anchor.bbox.cy) / 2.0)
+        else:
+            split_spec = ("vertical", (main_anchor.bbox.cx + loft_anchor.bbox.cx) / 2.0)
+
+    if split_spec is None:
+        return [], None
+
+    candidate_map: dict[str, CandidateRegion] = {}
+    for index, span in enumerate(sorted(poja_spans, key=lambda item: (item.bbox.cy, item.bbox.cx)), start=1):
+        label_text = uppercase_normalized(_span_line_text(page, span))
+        view_kind = "loft" if "PARVEN" in label_text else "main"
+        orientation, boundary = split_spec
+        local_boxes = [
+            primitive.bbox
+            for primitive in page.vector_primitives
+            if primitive.bbox.area > 80.0
+            and primitive.bbox.width < page.width_pt * 0.95
+            and primitive.bbox.height < page.height_pt * 0.95
+            and abs(primitive.bbox.cx - span.bbox.cx) <= page.width_pt * 0.33
+            and primitive.bbox.cy >= span.bbox.cy - 120.0
+            and primitive.bbox.cy <= span.bbox.cy + page.height_pt * 0.58
+        ]
+        if orientation == "horizontal":
+            side = "top" if span.bbox.cy < boundary else "bottom"
+            candidate_id = f"{view_kind}_{side}_{index}"
+            if side == "top":
+                bbox = BBox(x0=0.0, y0=0.0, x1=page.width_pt, y1=boundary)
+            else:
+                bbox = BBox(x0=0.0, y0=boundary, x1=page.width_pt, y1=page.height_pt)
+        else:
+            side = "left" if span.bbox.cx < boundary else "right"
+            candidate_id = f"{view_kind}_{side}_{index}"
+            if side == "left":
+                bbox = BBox(x0=0.0, y0=0.0, x1=boundary, y1=page.height_pt)
+            else:
+                bbox = BBox(x0=boundary, y0=0.0, x1=page.width_pt, y1=page.height_pt)
+        union_box = BBox.union(local_boxes)
+        if union_box is not None and union_box.area > page.width_pt * page.height_pt * 0.01:
+            bbox = BBox(
+                x0=max(0.0, union_box.x0 - 60.0),
+                y0=max(0.0, union_box.y0 - 80.0),
+                x1=min(page.width_pt, union_box.x1 + 60.0),
+                y1=min(page.height_pt, union_box.y1 + 80.0),
+            )
+        candidate_map[candidate_id] = CandidateRegion(
+            candidate_id=candidate_id,
+            label=label_text or "POHJA",
+            bbox=bbox,
+            metadata={
+                "orientation": orientation,
+                "side": side,
+                "view_kind": view_kind,
+                "anchor_x": round(span.bbox.cx, 1),
+                "anchor_y": round(span.bbox.cy, 1),
+            },
+        )
+    return list(candidate_map.values()), split_spec
+
+
+def detect_primary_plan_region(
+    page: DocumentPage,
+    ai_resolver: HybridAiResolver | None = None,
+) -> tuple[BBox, list[str], list[str]]:
+    assumptions: list[str] = []
+    warnings: list[str] = []
+    poja_spans = [span for span in page.text_spans if uppercase_normalized(span.text) == "POHJA"]
+    parvi_spans = [span for span in page.text_spans if uppercase_normalized(span.text) == "PARVEN"]
+    candidates, split_spec = _plan_region_candidates(page)
+    if ai_resolver is not None and candidates:
+        selected_candidate_id = ai_resolver.choose_plan_region(page, candidates)
+        if selected_candidate_id is not None:
+            selected = next((candidate for candidate in candidates if candidate.candidate_id == selected_candidate_id), None)
+            if selected is not None:
+                assumptions.append(
+                    f"AI selected plan region {selected.candidate_id} ({selected.label}) as the footprint source."
+                )
+                return selected.bbox, assumptions, warnings
+    boundary = split_spec[1] if split_spec is not None else None
+    orientation = split_spec[0] if split_spec is not None else None
 
     if poja_spans and parvi_spans:
         main_anchor = min(poja_spans, key=lambda span: span.bbox.x0)
         loft_anchor = max(parvi_spans, key=lambda span: span.bbox.x0)
+        if abs(main_anchor.bbox.cy - loft_anchor.bbox.cy) > abs(main_anchor.bbox.cx - loft_anchor.bbox.cx):
+            boundary = (main_anchor.bbox.cy + loft_anchor.bbox.cy) / 2.0
+            return BBox(x0=0.0, y0=0.0, x1=page.width_pt, y1=min(boundary, page.height_pt)), assumptions, warnings
         boundary = max(main_anchor.bbox.x1 + 200.0, loft_anchor.bbox.x0 - 100.0)
-        return BBox(x0=0.0, y0=0.0, x1=min(boundary, page.width_pt), y1=page.height_pt)
+        return BBox(x0=0.0, y0=0.0, x1=min(boundary, page.width_pt), y1=page.height_pt), assumptions, warnings
 
-    return BBox(x0=0.0, y0=0.0, x1=page.width_pt, y1=page.height_pt)
+    if poja_spans and boundary is not None:
+        main_anchor = min(
+            poja_spans,
+            key=lambda span: (("PARVEN" in uppercase_normalized(_span_line_text(page, span))), span.bbox.x0),
+        )
+        if orientation == "horizontal":
+            if main_anchor.bbox.cy < boundary:
+                return BBox(x0=0.0, y0=0.0, x1=page.width_pt, y1=boundary), assumptions, warnings
+            return BBox(x0=0.0, y0=boundary, x1=page.width_pt, y1=page.height_pt), assumptions, warnings
+        if main_anchor.bbox.cx < boundary:
+            return BBox(x0=0.0, y0=0.0, x1=boundary, y1=page.height_pt), assumptions, warnings
+        return BBox(x0=boundary, y0=0.0, x1=page.width_pt, y1=page.height_pt), assumptions, warnings
+
+    return BBox(x0=0.0, y0=0.0, x1=page.width_pt, y1=page.height_pt), assumptions, warnings
 
 
 def _largest_dimension_by_orientation(
@@ -205,6 +305,24 @@ def _preferred_wall_height_m(
     return float(np.median(values))
 
 
+def _wall_height_candidates(
+    measurements: MeasurementStore,
+    candidate_page_ids: list[str],
+) -> tuple[list[float], dict[str, Any]]:
+    values: list[float] = []
+    page_values: dict[str, list[float]] = {}
+    for page_id in candidate_page_ids:
+        page_candidates = [
+            round(measurement.value_m, 3)
+            for measurement in measurements_for_page(measurements, page_id)
+            if measurement.kind == "level_marker" and 2.0 <= measurement.value_m <= 7.2
+        ]
+        if page_candidates:
+            page_values[page_id] = page_candidates
+            values.extend(page_candidates)
+    return values, {"page_candidates": page_values, "counts": dict(Counter(values))}
+
+
 def _line_text(page: DocumentPage, block_no: int, line_no: int) -> str:
     line_spans = [span for span in page.text_spans if span.block_no == block_no and span.line_no == line_no]
     line_spans.sort(key=lambda span: span.word_no)
@@ -277,6 +395,7 @@ def reconstruct_geometry(
     pages: list[DocumentPage],
     classifications: list[ClassificationResult],
     measurements: MeasurementStore,
+    ai_resolver: HybridAiResolver | None = None,
 ) -> tuple[FootprintModel, list[FacadeModel], list[str], list[str]]:
     assumptions: list[str] = []
     warnings: list[str] = []
@@ -285,7 +404,9 @@ def reconstruct_geometry(
     if plan_page is None:
         raise RuntimeError("No plan sheet was classified. Geometry reconstruction requires a plan.")
 
-    plan_region = detect_primary_plan_region(plan_page)
+    plan_region, plan_assumptions, plan_warnings = detect_primary_plan_region(plan_page, ai_resolver=ai_resolver)
+    assumptions.extend(plan_assumptions)
+    warnings.extend(plan_warnings)
     width_m = _chain_dimension_sum(measurements, plan_page.page_id, plan_region, "horizontal")
     depth_m = _chain_dimension_sum(measurements, plan_page.page_id, plan_region, "vertical")
     if width_m is None:
@@ -304,10 +425,18 @@ def reconstruct_geometry(
     footprint_polygon = build_rectangular_footprint(width_m, depth_m)
     section_page = _page_for_role(pages, classifications, "section")
     elevation_page = _page_for_role(pages, classifications, "elevations")
-    wall_height_m = _preferred_wall_height_m(
-        measurements,
-        [page_id for page_id in [section_page.page_id if section_page else None, elevation_page.page_id if elevation_page else None] if page_id],
-    )
+    candidate_page_ids = [page_id for page_id in [section_page.page_id if section_page else None, elevation_page.page_id if elevation_page else None] if page_id]
+    wall_height_values, wall_height_evidence = _wall_height_candidates(measurements, candidate_page_ids)
+    wall_height_m = None
+    if ai_resolver is not None and wall_height_values:
+        wall_height_m = ai_resolver.choose_wall_height(wall_height_values, wall_height_evidence)
+        if wall_height_m is not None:
+            assumptions.append(f"AI selected wall-height marker {wall_height_m:.3f} m from section/elevation candidates.")
+    if wall_height_m is None:
+        wall_height_m = _preferred_wall_height_m(
+            measurements,
+            candidate_page_ids,
+        )
     if wall_height_m is None:
         wall_height_m = 4.0
         warnings.append("No repeated exterior wall height marker was found; using a 4.0 m fallback wall height.")

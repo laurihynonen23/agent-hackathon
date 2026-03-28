@@ -138,6 +138,15 @@ def write_report(path: Path, artifacts: PipelineArtifacts) -> None:
             f"| {code} | {quantity.area_m2:.2f} | {quantity.linear_m_nominal_cover:.2f} | {quantity.assumed_nominal_cover_mm} |"
         )
 
+    ai_rows = []
+    for decision in artifacts.ai_decisions:
+        selected = decision.selected if decision.selected is not None else "--"
+        confidence = f"{decision.confidence:.2f}" if decision.confidence is not None else "--"
+        rationale = (decision.rationale or decision.fallback_reason or "").replace("|", "/")
+        ai_rows.append(
+            f"| {decision.decision_type} | {'ai' if decision.used else 'fallback'} | {selected} | {confidence} | {rationale} |"
+        )
+
     assumptions = "\n".join(f"- {item}" for item in artifacts.results.assumptions) or "- None"
     warnings = "\n".join(f"- {item}" for item in artifacts.results.warnings) or "- None"
     report = f"""# First Mate Estimator Report
@@ -182,6 +191,12 @@ def write_report(path: Path, artifacts: PipelineArtifacts) -> None:
 | --- | --- | --- | --- |
 {chr(10).join(material_rows) if material_rows else '| None | 0.00 | 0.00 | 0 |'}
 
+## AI Decisions
+
+| Decision | Mode | Selected | Confidence | Rationale |
+| --- | --- | --- | --- | --- |
+{chr(10).join(ai_rows) if ai_rows else '| None | fallback | -- | -- | No AI decisions recorded. |'}
+
 ## Assumptions
 
 {assumptions}
@@ -199,4 +214,3 @@ def write_report(path: Path, artifacts: PipelineArtifacts) -> None:
 - `overlays/elevations_overlay.png`
 """
     path.write_text(report, encoding="utf-8")
-

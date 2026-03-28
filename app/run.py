@@ -12,6 +12,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input", required=True, help="Input folder containing PDF drawings")
     parser.add_argument("--output", required=True, help="Output folder for results and debug artifacts")
     parser.add_argument("--ocr", choices=["auto", "off", "require"], default="auto", help="OCR policy")
+    parser.add_argument("--ai", choices=["off", "auto", "require"], default="auto", help="AI ambiguity-resolution policy")
+    parser.add_argument("--ai-model", default=None, help="Optional model name for the AI resolver")
+    parser.add_argument("--ai-base-url", default=None, help="Optional OpenAI-compatible base URL for the AI resolver")
     parser.add_argument("--render-dpi", type=int, default=200, help="Raster DPI for rendered page images")
     parser.add_argument("--report-format", choices=["md"], default="md", help="Human-readable report format")
     return parser
@@ -33,6 +36,9 @@ def main(argv: list[str] | None = None) -> int:
             output_dir=output_dir,
             render_dpi=args.render_dpi,
             ocr_mode=args.ocr,
+            ai_mode=args.ai,
+            ai_model=args.ai_model,
+            ai_base_url=args.ai_base_url,
             report_format=args.report_format,
         )
     except Exception as exc:  # pragma: no cover - top-level failure path
@@ -48,4 +54,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

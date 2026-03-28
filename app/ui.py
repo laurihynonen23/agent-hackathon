@@ -694,6 +694,18 @@ def build_index_html() -> str:
             <label for="renderDpi">Render DPI</label>
             <input id="renderDpi" type="number" min="96" max="400" step="4" value="200">
           </div>
+          <div>
+            <label for="aiMode">AI resolver</label>
+            <select id="aiMode">
+              <option value="auto">auto</option>
+              <option value="off">off</option>
+              <option value="require">require</option>
+            </select>
+          </div>
+          <div>
+            <label for="aiModel">AI model</label>
+            <input id="aiModel" type="text" placeholder="optional local/model override">
+          </div>
         </div>
 
         <div class="button-row">
@@ -1055,6 +1067,15 @@ def build_index_html() -> str:
           <td>${escapeHtml(String(payload.assumed_nominal_cover_mm))}</td>
         </tr>
       `).join("") || `<tr><td colspan="4">No material quantities available.</td></tr>`;
+      const aiDecisionRows = (summary.ai_decisions || []).map((decision) => `
+        <tr>
+          <td>${escapeHtml(decision.decision_type)}</td>
+          <td>${escapeHtml(decision.used ? "ai" : "fallback")}</td>
+          <td>${escapeHtml(decision.selected == null ? "--" : String(decision.selected))}</td>
+          <td>${escapeHtml(decision.confidence == null ? "--" : decision.confidence.toFixed(2))}</td>
+          <td>${escapeHtml(decision.rationale || decision.fallback_reason || "")}</td>
+        </tr>
+      `).join("") || `<tr><td colspan="5">No AI decisions recorded for this run.</td></tr>`;
 
       const facadeRows = summary.facades.map((facade) => `
         <tr>
@@ -1074,6 +1095,12 @@ def build_index_html() -> str:
       block.innerHTML = `
         <div class="muted" style="margin-bottom:8px">Measurement counts</div>
         <div class="chip-row">${measurementChips}</div>
+        <div style="margin-bottom:18px">
+          <table>
+            <thead><tr><th>AI Decision</th><th>Mode</th><th>Selected</th><th>Confidence</th><th>Rationale</th></tr></thead>
+            <tbody>${aiDecisionRows}</tbody>
+          </table>
+        </div>
         <div style="margin-bottom:18px">
           <table>
             <thead><tr><th>Sheet</th><th>Role</th><th>Score</th><th>Reasons</th></tr></thead>
@@ -1193,6 +1220,9 @@ def build_index_html() -> str:
       const formData = new FormData();
       formData.append("ocr_mode", document.getElementById("ocrMode").value);
       formData.append("render_dpi", document.getElementById("renderDpi").value);
+      formData.append("ai_mode", document.getElementById("aiMode").value);
+      const aiModelValue = document.getElementById("aiModel").value.trim();
+      if (aiModelValue) formData.append("ai_model", aiModelValue);
       if (useSample) {
         formData.append("use_sample", "1");
       } else {
@@ -1273,6 +1303,7 @@ def build_job_summary(job_id: str, artifacts: PipelineArtifacts, output_dir: Pat
         "openings": [item.model_dump(mode="json") for item in artifacts.openings],
         "cladding_regions": [item.model_dump(mode="json") for item in artifacts.cladding_regions],
         "material_specs": {code: spec.model_dump(mode="json") for code, spec in artifacts.material_specs.items()},
+        "ai_decisions": [item.model_dump(mode="json") for item in artifacts.ai_decisions],
         "validation": artifacts.validation.model_dump(mode="json"),
         "report_markdown": _read_markdown(output_dir / "report.md"),
         "files": {
@@ -1338,7 +1369,7 @@ def _record_job_event(job: JobState, event: dict[str, Any]) -> None:
         )
 
 
-def _run_job(job: JobState, render_dpi: int, ocr_mode: str) -> None:
+def _run_job(job: JobState, render_dpi: int, ocr_mode: str, ai_mode: str, ai_model: str | None) -> None:
     with job.lock:
         job.status = "running"
     _record_job_event(job, {"stage": "ingest", "status": "running", "summary": "Job started.", "details": {}})
@@ -1349,6 +1380,8 @@ def _run_job(job: JobState, render_dpi: int, ocr_mode: str) -> None:
             output_dir=job.output_dir,
             render_dpi=render_dpi,
             ocr_mode=ocr_mode,
+            ai_mode=ai_mode,
+            ai_model=ai_model,
             report_format="md",
             progress_callback=lambda event: _record_job_event(job, event),
         )
@@ -1393,7 +1426,9 @@ def _create_job_from_request(
 
     render_dpi = int(fields.get("render_dpi", "200"))
     ocr_mode = fields.get("ocr_mode", "auto")
-    threading.Thread(target=_run_job, args=(job, render_dpi, ocr_mode), daemon=True).start()
+    ai_mode = fields.get("ai_mode", "auto")
+    ai_model = fields.get("ai_model") or None
+    threading.Thread(target=_run_job, args=(job, render_dpi, ocr_mode, ai_mode, ai_model), daemon=True).start()
     return job
 
 

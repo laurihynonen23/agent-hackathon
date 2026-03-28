@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 
+from .ai import HybridAiResolver
 from .extract_dimensions import MeasurementStore
 from .extract_text import uppercase_normalized
 from .types import CladdingRegion, DocumentPage, FacadeModel, MaterialQuantity, MaterialSpec, Opening
@@ -123,11 +124,19 @@ def _section_primary_material(
     return None, None
 
 
+def _section_material_lines(pages: list[DocumentPage]) -> list[str]:
+    section_page = _page_by_name(pages, "Leikkaus")
+    if section_page is None:
+        return []
+    return [line.strip() for line in section_page.raw_text.splitlines() if "ULKOVERHOUSPANEELI" in uppercase_normalized(line)]
+
+
 def extract_material_quantities(
     pages: list[DocumentPage],
     facades: list[FacadeModel],
     openings: list[Opening],
     measurements: MeasurementStore,
+    ai_resolver: HybridAiResolver | None = None,
 ) -> tuple[dict[str, MaterialSpec], list[CladdingRegion], dict[str, MaterialQuantity], list[str], list[str]]:
     del measurements  # reserved for future refinement and kept in the signature for auditability
     assumptions: list[str] = []
@@ -135,12 +144,29 @@ def extract_material_quantities(
 
     specs = parse_material_specs(pages)
     primary_code, effective_cover_mm = _section_primary_material(pages, specs)
+    section_lines = _section_material_lines(pages)
     elevation_page = _page_by_name(pages, "Julkisivut")
     if elevation_page is None and pages:
         elevation_page = next((page for page in pages if "JULKISIVU" in uppercase_normalized(page.raw_text)), None)
 
     local_labels = _local_material_labels(elevation_page, specs) if elevation_page is not None else []
     global_counts = Counter(code for code, _, _ in local_labels)
+    deterministic_primary_code = primary_code
+    ai_primary_code = None
+    if ai_resolver is not None and specs:
+        ai_primary_code = ai_resolver.choose_primary_material(specs, section_lines, dict(global_counts))
+        if ai_primary_code is not None:
+            primary_code = ai_primary_code
+            if ai_primary_code != deterministic_primary_code:
+                effective_cover_mm = None
+            if ai_primary_code == deterministic_primary_code:
+                assumptions.append(
+                    f"AI confirmed {ai_primary_code} as the dominant cladding code for procurement."
+                )
+            else:
+                assumptions.append(
+                    f"AI selected {ai_primary_code} as the dominant cladding code for procurement."
+                )
     cladding_regions: list[CladdingRegion] = []
 
     openings_by_facade = defaultdict(float)
@@ -148,9 +174,14 @@ def extract_material_quantities(
         openings_by_facade[opening.facade_name] += opening.area_m2
 
     if primary_code is not None:
-        assumptions.append(
-            f"Used section wall-build-up cladding spec {primary_code} as the primary exterior cladding for procurement because elevation region segmentation is ambiguous."
-        )
+        if ai_primary_code is not None:
+            assumptions.append(
+                f"Used AI-selected cladding spec {primary_code} as the primary exterior cladding for procurement because elevation region segmentation is ambiguous."
+            )
+        else:
+            assumptions.append(
+                f"Used section wall-build-up cladding spec {primary_code} as the primary exterior cladding for procurement because elevation region segmentation is ambiguous."
+            )
         assumptions.append("Board procurement is reported without subtracting openings.")
         for facade in facades:
             if facade.area_gross_m2 <= 0:

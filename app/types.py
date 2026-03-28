@@ -214,6 +214,26 @@ class ConfidenceScores(BaseModel):
     materials: float
 
 
+class AiSettings(BaseModel):
+    mode: Literal["off", "auto", "require"] = "auto"
+    model: str | None = None
+    base_url: str | None = None
+
+
+class AiDecision(BaseModel):
+    decision_type: str
+    used: bool = False
+    provider: str | None = None
+    model: str | None = None
+    selected: Any = None
+    confidence: float | None = None
+    rationale: str = ""
+    fallback_used: bool = False
+    fallback_reason: str | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    raw_response: dict[str, Any] = Field(default_factory=dict)
+
+
 class ValidationSummary(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -243,4 +263,4 @@ class PipelineArtifacts(BaseModel):
     material_specs: dict[str, MaterialSpec]
     validation: ValidationSummary
     results: Results
-
+    ai_decisions: list[AiDecision] = Field(default_factory=list)

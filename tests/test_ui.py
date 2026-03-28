@@ -6,6 +6,7 @@ def test_ui_html_exposes_transparent_process_copy():
     assert "Local PDF takeoff with the process fully exposed." in html
     assert "Process Ledger" in html
     assert "No black box" in html
+    assert "AI resolver" in html
 
 
 def test_ui_stage_order_matches_pipeline_expectations():
