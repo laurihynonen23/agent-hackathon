@@ -103,6 +103,13 @@ class HybridAiResolver:
             self._provider_cache = (None, None, None)
             return self._provider_cache
 
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if openai_api_key:
+            openai_base_url = self.settings.base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+            openai_model = self.settings.model or os.getenv("OPENAI_MODEL") or "gpt-4o"
+            self._provider_cache = ("openai_compat", openai_base_url.rstrip("/"), openai_model)
+            return self._provider_cache
+
         explicit_base_url = self.settings.base_url or os.getenv("ESTIMATOR_AI_BASE_URL")
         explicit_model = self.settings.model or os.getenv("ESTIMATOR_AI_MODEL")
 
@@ -184,7 +191,7 @@ class HybridAiResolver:
                 return parsed
 
             if provider == "openai_compat":
-                api_key = os.getenv("ESTIMATOR_AI_API_KEY")
+                api_key = os.getenv("OPENAI_API_KEY") or os.getenv("ESTIMATOR_AI_API_KEY")
                 content: list[dict[str, Any]] = [{"type": "text", "text": user_prompt}]
                 for path in image_paths or []:
                     content.append(

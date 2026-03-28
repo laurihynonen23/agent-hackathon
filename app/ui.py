@@ -704,7 +704,7 @@ def build_index_html() -> str:
           </div>
           <div>
             <label for="aiModel">AI model</label>
-            <input id="aiModel" type="text" placeholder="optional local/model override">
+            <input id="aiModel" type="text" placeholder="gpt-4o by default with OpenAI">
           </div>
         </div>
 
