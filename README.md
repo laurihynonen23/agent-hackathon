@@ -1,0 +1,85 @@
+# First Mate Local-First Estimator
+
+Hackathon-grade but deterministic-first estimator for house exterior quantities from architectural PDF drawings.
+
+## What it does
+
+- ingests all PDFs in an input folder
+- classifies pages as `plan`, `section`, `elevations`, or `unknown`
+- extracts embedded text and vector geometry with PyMuPDF
+- reconstructs a rectangular exterior footprint from overall plan dimensions
+- estimates facade widths and heights from elevations plus section cross-checks
+- detects likely windows and doors from elevation vector boxes
+- parses cladding labels such as `3a` and `3b`
+- writes JSON results, a Markdown report, annotated overlays, and debug JSON
+
+The pipeline is local-first. It does not require remote LLM access. OCR is an optional fallback only.
+
+## Install
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+Optional OCR fallback:
+
+- install Tesseract locally
+- keep `--ocr auto` or use `--ocr require`
+
+## Usage
+
+```bash
+python -m app.run --input ./data --output ./out
+```
+
+Example with the included sample fixtures:
+
+```bash
+python -m app.run \
+  --input ./tests/fixtures/sample_drawings \
+  --output ./out
+```
+
+## Outputs
+
+- `out/results.json`
+- `out/report.md`
+- `out/overlays/plan_overlay.png`
+- `out/overlays/section_overlay.png`
+- `out/overlays/elevations_overlay.png`
+- `out/debug/*.json`
+
+## Result schema
+
+```json
+{
+  "perimeter_exterior_m": 0.0,
+  "gross_outer_wall_area_m2": 0.0,
+  "openings_area_m2": 0.0,
+  "net_cladding_area_m2": 0.0,
+  "cladding_by_type": {},
+  "assumptions": [],
+  "warnings": [],
+  "confidence": {
+    "overall": 0.0,
+    "geometry": 0.0,
+    "openings": 0.0,
+    "materials": 0.0
+  }
+}
+```
+
+## Notes on the current heuristic model
+
+- footprint reconstruction is intentionally conservative and currently assumes an orthogonal exterior footprint from overall plan dimension chains
+- facade gross areas are calibrated from elevation cluster widths and heights
+- gable end area is modeled as `width * eave_height + 0.5 * width * (ridge_height - eave_height)`
+- material split is deterministic but approximate when multiple local cladding labels appear on a facade
+- the report and debug JSON are intended to make every assumption auditable
+
+## Tests
+
+```bash
+pytest
+```
+
