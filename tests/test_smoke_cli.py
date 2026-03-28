@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from app.planner import run_pipeline
 from app.run import main
 
 
@@ -27,3 +28,20 @@ def test_cli_smoke(tmp_path: Path):
     assert (overlays_dir / "plan_overlay.png").exists()
     assert (output_dir / "report.md").exists()
 
+
+@pytest.mark.integration
+def test_pipeline_emits_progress_events(tmp_path: Path):
+    pytest.importorskip("fitz")
+    input_dir = Path("tests/fixtures/sample_drawings")
+    output_dir = tmp_path / "out_progress"
+    events = []
+    artifacts = run_pipeline(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        progress_callback=events.append,
+    )
+    assert artifacts.results.perimeter_exterior_m > 0
+    stages = [event["stage"] for event in events if event["status"] == "completed"]
+    assert "ingest" in stages
+    assert "classify" in stages
+    assert "report" in stages

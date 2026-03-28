@@ -40,6 +40,24 @@ python -m app.run \
   --output ./out
 ```
 
+## Local UI
+
+Launch the local drag-and-drop UI:
+
+```bash
+python -m app.ui --open-browser
+```
+
+Then open `http://127.0.0.1:8765` if the browser does not open automatically.
+
+The UI:
+
+- accepts multiple PDF uploads by drag and drop
+- can run the bundled sample drawing set with one click
+- streams the pipeline stages as they execute
+- shows final metrics, warnings, assumptions, facade tables, overlays, and report preview
+- keeps all uploaded files and outputs local under `.ui_runs/<job_id>/`
+
 ## Outputs
 
 - `out/results.json`
@@ -48,6 +66,8 @@ python -m app.run \
 - `out/overlays/section_overlay.png`
 - `out/overlays/elevations_overlay.png`
 - `out/debug/*.json`
+
+UI runs create the same outputs under `.ui_runs/<job_id>/output/`.
 
 ## Result schema
 
@@ -82,4 +102,3 @@ python -m app.run \
 ```bash
 pytest
 ```
-

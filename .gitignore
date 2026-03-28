@@ -3,5 +3,6 @@ __pycache__/
 .mypy_cache/
 .DS_Store
 out/
+.ui_runs/
 vendor_local/
 .venv/
