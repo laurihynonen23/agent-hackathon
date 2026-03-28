@@ -402,6 +402,7 @@ def build_index_html() -> str:
       display: flex;
       justify-content: space-between;
       gap: 12px;
+      flex-wrap: wrap;
       margin-bottom: 8px;
       font-size: 0.84rem;
     }
@@ -419,13 +420,66 @@ def build_index_html() -> str:
       color: var(--ink);
       line-height: 1.5;
     }
-    .mini-grid {
+    .event-details {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: 1fr;
       gap: 8px;
+    }
+    .event-detail {
+      border-radius: 14px;
+      padding: 10px 12px;
+      background: rgba(24, 22, 26, 0.04);
+      border: 1px solid rgba(24,22,26,0.06);
+      min-width: 0;
+    }
+    .event-detail-key {
+      display: block;
+      margin-bottom: 6px;
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .event-detail-value {
+      margin: 0;
       font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
       font-size: 0.74rem;
+      line-height: 1.45;
+      color: var(--ink);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .confidence-strip {
+      margin-top: 14px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+    }
+    .confidence-card {
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.7);
+      border: 1px solid rgba(24,22,26,0.08);
+      min-width: 0;
+      min-height: 88px;
+    }
+    .confidence-label {
+      font-size: 0.74rem;
       color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      line-height: 1.25;
+    }
+    .confidence-value {
+      margin-top: 8px;
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--ink);
+      line-height: 1.1;
     }
     .artifact-links {
       display: flex;
@@ -440,6 +494,38 @@ def build_index_html() -> str:
       padding: 9px 12px;
       font-size: 0.84rem;
       background: rgba(255,255,255,0.78);
+    }
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(24,22,26,0.08);
+      background: rgba(255,255,255,0.72);
+      min-width: 0;
+      max-width: 100%;
+    }
+    .chip-key {
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .chip-value {
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--ink);
     }
     table {
       width: 100%;
@@ -474,10 +560,20 @@ def build_index_html() -> str:
       gap: 12px;
     }
     .overlay-card {
+      display: block;
       border-radius: 18px;
       overflow: hidden;
       border: 1px solid rgba(24,22,26,0.08);
       background: rgba(255,255,255,0.75);
+      text-decoration: none;
+      color: inherit;
+      transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+      cursor: pointer;
+    }
+    .overlay-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(15, 95, 138, 0.24);
+      box-shadow: 0 14px 28px rgba(58, 39, 11, 0.08);
     }
     .overlay-card img {
       width: 100%;
@@ -487,6 +583,14 @@ def build_index_html() -> str:
     .overlay-caption {
       padding: 12px 14px;
       font-size: 0.86rem;
+    }
+    .overlay-hint {
+      display: block;
+      margin-top: 4px;
+      font-size: 0.74rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
     }
     pre {
       margin: 0;
@@ -523,16 +627,16 @@ def build_index_html() -> str:
     .status-bad { color: var(--red); }
     @media (max-width: 1280px) {
       .layout { grid-template-columns: minmax(300px, 340px) minmax(0, 1fr); }
-      .metrics, .stage-grid, .overlay-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metrics, .stage-grid, .overlay-grid, .confidence-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 1200px) {
       .hero, .layout, .content-grid { grid-template-columns: 1fr; }
       .controls { position: static; }
-      .metrics, .stage-grid, .overlay-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metrics, .stage-grid, .overlay-grid, .confidence-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 760px) {
       .shell { padding: 16px; }
-      .metrics, .stage-grid, .overlay-grid, .controls-grid, .split-grid { grid-template-columns: 1fr; }
+      .metrics, .stage-grid, .overlay-grid, .controls-grid, .split-grid, .confidence-strip { grid-template-columns: 1fr; }
       .button-row { flex-direction: column; }
       button { width: 100%; }
     }
@@ -644,6 +748,7 @@ def build_index_html() -> str:
               <div class="metric"><div class="metric-label">Openings</div><div class="metric-value">--</div></div>
               <div class="metric"><div class="metric-label">Net Cladding</div><div class="metric-value">--</div></div>
             </div>
+            <div id="confidenceStrip" class="confidence-strip"></div>
             <div id="artifactLinks" class="artifact-links" style="margin-top:16px"></div>
           </div>
         </section>
@@ -829,8 +934,16 @@ def build_index_html() -> str:
       const html = [...events].reverse().map((event) => {
         const details = event.details || {};
         const detailEntries = Object.entries(details).slice(0, 6).map(([key, value]) => {
-          const formatted = typeof value === "object" ? JSON.stringify(value) : value;
-          return `<div><strong>${escapeHtml(key)}</strong><br>${escapeHtml(String(formatted))}</div>`;
+          const formatted = typeof value === "object"
+            ? JSON.stringify(value, null, 2)
+            : String(value);
+          const clipped = formatted.length > 700 ? formatted.slice(0, 700) + "\\n..." : formatted;
+          return `
+            <div class="event-detail">
+              <span class="event-detail-key">${escapeHtml(key)}</span>
+              <div class="event-detail-value">${escapeHtml(clipped)}</div>
+            </div>
+          `;
         }).join("");
         return `
           <article class="event ${escapeHtml(event.status)}">
@@ -839,7 +952,7 @@ def build_index_html() -> str:
               <span class="event-time">${escapeHtml(event.timestamp)}</span>
             </header>
             <p class="event-summary">${escapeHtml(event.summary)}</p>
-            ${detailEntries ? `<div class="mini-grid">${detailEntries}</div>` : ""}
+            ${detailEntries ? `<div class="event-details">${detailEntries}</div>` : ""}
           </article>
         `;
       }).join("");
@@ -850,18 +963,28 @@ def build_index_html() -> str:
       return `<div class="metric"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">${escapeHtml(value)}</div></div>`;
     }
 
+    function confidenceCard(label, value) {
+      return `
+        <div class="confidence-card">
+          <div class="confidence-label">${escapeHtml(label)}</div>
+          <div class="confidence-value">${escapeHtml(value)}</div>
+        </div>
+      `;
+    }
+
     function renderMetrics(results) {
       const grid = document.getElementById("metricsGrid");
       if (!results) {
-        grid.innerHTML = [
-          metricCard("Perimeter", "--"),
-          metricCard("Gross Wall Area", "--"),
-          metricCard("Openings", "--"),
-          metricCard("Net Cladding", "--"),
-          metricCard("Board Takeoff", "--")
-        ].join("");
-        return;
-      }
+      grid.innerHTML = [
+        metricCard("Perimeter", "--"),
+        metricCard("Gross Wall Area", "--"),
+        metricCard("Openings", "--"),
+        metricCard("Net Cladding", "--"),
+        metricCard("Board Takeoff", "--")
+      ].join("");
+      renderConfidence(null);
+      return;
+    }
       const quantities = Object.entries(results.cladding_by_type || {});
       const primaryQuantity = quantities.sort((left, right) => right[1].linear_m_nominal_cover - left[1].linear_m_nominal_cover)[0];
       const takeoffValue = primaryQuantity
@@ -873,6 +996,26 @@ def build_index_html() -> str:
         metricCard("Openings", results.openings_area_m2.toFixed(2) + " m²"),
         metricCard("Net Cladding", results.net_cladding_area_m2.toFixed(2) + " m²"),
         metricCard("Board Takeoff", takeoffValue)
+      ].join("");
+      renderConfidence(results.confidence || null);
+    }
+
+    function renderConfidence(confidence) {
+      const strip = document.getElementById("confidenceStrip");
+      if (!confidence) {
+        strip.innerHTML = [
+          confidenceCard("Overall Confidence", "--"),
+          confidenceCard("Geometry", "--"),
+          confidenceCard("Openings", "--"),
+          confidenceCard("Materials", "--")
+        ].join("");
+        return;
+      }
+      strip.innerHTML = [
+        confidenceCard("Overall Confidence", confidence.overall.toFixed(2)),
+        confidenceCard("Geometry", confidence.geometry.toFixed(2)),
+        confidenceCard("Openings", confidence.openings.toFixed(2)),
+        confidenceCard("Materials", confidence.materials.toFixed(2))
       ].join("");
     }
 
@@ -921,9 +1064,16 @@ def build_index_html() -> str:
           <td>${escapeHtml(facade.area_gross_m2.toFixed(2))}</td>
         </tr>
       `).join("");
+      const measurementChips = Object.entries(summary.measurement_counts || {}).map(([key, value]) => `
+        <span class="chip">
+          <span class="chip-key">${escapeHtml(key)}</span>
+          <span class="chip-value">${escapeHtml(String(value))}</span>
+        </span>
+      `).join("");
       block.className = "";
       block.innerHTML = `
-        <div class="muted" style="margin-bottom:16px">Measurement counts: ${escapeHtml(JSON.stringify(summary.measurement_counts))}</div>
+        <div class="muted" style="margin-bottom:8px">Measurement counts</div>
+        <div class="chip-row">${measurementChips}</div>
         <div style="margin-bottom:18px">
           <table>
             <thead><tr><th>Sheet</th><th>Role</th><th>Score</th><th>Reasons</th></tr></thead>
@@ -976,10 +1126,13 @@ def build_index_html() -> str:
         return;
       }
       const cards = Object.entries(summary.files.overlays).map(([label, url]) => `
-        <div class="overlay-card">
+        <a class="overlay-card" href="${url}" target="_blank" rel="noreferrer">
           <img src="${url}" alt="${escapeHtml(label)} overlay">
-          <div class="overlay-caption">${escapeHtml(label)}</div>
-        </div>
+          <div class="overlay-caption">
+            ${escapeHtml(label)}
+            <span class="overlay-hint">Open full image</span>
+          </div>
+        </a>
       `).join("");
       grid.innerHTML = cards;
     }
