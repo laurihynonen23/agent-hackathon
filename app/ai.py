@@ -16,6 +16,7 @@ from .types import AiDecision, AiSettings, BBox, DocumentPage, MaterialSpec
 
 
 JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
+DEFAULT_OPENAI_MODEL = "gpt-5.2"
 
 
 @dataclass
@@ -31,6 +32,9 @@ class HybridAiResolver:
         self.settings = settings or AiSettings()
         self.decisions: list[AiDecision] = []
         self._provider_cache: tuple[str | None, str | None, str | None] | None = None
+
+    def _resolve_api_key(self) -> str | None:
+        return self.settings.api_key or os.getenv("OPENAI_API_KEY") or os.getenv("ESTIMATOR_AI_API_KEY")
 
     def _record_fallback(
         self,
@@ -103,10 +107,10 @@ class HybridAiResolver:
             self._provider_cache = (None, None, None)
             return self._provider_cache
 
-        openai_api_key = os.getenv("OPENAI_API_KEY")
+        openai_api_key = self._resolve_api_key()
         if openai_api_key:
             openai_base_url = self.settings.base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
-            openai_model = self.settings.model or os.getenv("OPENAI_MODEL") or "gpt-4o"
+            openai_model = self.settings.model or os.getenv("OPENAI_MODEL") or DEFAULT_OPENAI_MODEL
             self._provider_cache = ("openai_compat", openai_base_url.rstrip("/"), openai_model)
             return self._provider_cache
 
@@ -191,7 +195,7 @@ class HybridAiResolver:
                 return parsed
 
             if provider == "openai_compat":
-                api_key = os.getenv("OPENAI_API_KEY") or os.getenv("ESTIMATOR_AI_API_KEY")
+                api_key = self._resolve_api_key()
                 content: list[dict[str, Any]] = [{"type": "text", "text": user_prompt}]
                 for path in image_paths or []:
                     content.append(

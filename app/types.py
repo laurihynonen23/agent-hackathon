@@ -218,6 +218,7 @@ class AiSettings(BaseModel):
     mode: Literal["off", "auto", "require"] = "auto"
     model: str | None = None
     base_url: str | None = None
+    api_key: str | None = None
 
 
 class AiDecision(BaseModel):

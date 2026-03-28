@@ -15,7 +15,7 @@ Hackathon-grade but deterministic-first estimator for house exterior quantities 
 
 The pipeline is local-first. It does not require remote LLM access. OCR is an optional fallback only.
 An optional AI resolver can be enabled in `auto` or `require` mode. It tries a local Ollama endpoint first and can also use a configured OpenAI-compatible endpoint, but the estimator still runs without any model runtime.
-If `OPENAI_API_KEY` is present, the resolver now defaults to OpenAI with `gpt-4o` unless you override the model.
+If `OPENAI_API_KEY` is present, the resolver now defaults to OpenAI with `gpt-5.2` unless you override the model.
 
 ## Install
 
@@ -60,7 +60,7 @@ python -m app.run \
   --input ./data \
   --output ./out \
   --ai require \
-  --ai-model llava
+  --ai-model gpt-5.1
 ```
 
 Example with the included sample fixtures:
@@ -85,7 +85,7 @@ The UI:
 
 - accepts multiple PDF uploads by drag and drop
 - can run the bundled sample drawing set with one click
-- exposes an `AI resolver` mode and optional model override
+- exposes an `AI resolver` mode, a per-run OpenAI API key input, and a model chooser
 - streams the pipeline stages as they execute
 - shows final metrics, warnings, assumptions, facade tables, overlays, and report preview
 - keeps all uploaded files and outputs local under `.ui_runs/<job_id>/`

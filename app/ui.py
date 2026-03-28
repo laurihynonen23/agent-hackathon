@@ -254,7 +254,7 @@ def build_index_html() -> str:
       margin-bottom: 6px;
       color: var(--muted);
     }
-    select, input[type="number"] {
+    select, input[type="number"], input[type="text"], input[type="password"] {
       width: 100%;
       padding: 12px 13px;
       border-radius: 14px;
@@ -262,6 +262,16 @@ def build_index_html() -> str:
       background: rgba(255,255,255,0.92);
       font-size: 0.95rem;
       color: var(--ink);
+    }
+    .control-span {
+      grid-column: 1 / -1;
+    }
+    .control-note {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.77rem;
+      line-height: 1.45;
     }
     .button-row {
       display: flex;
@@ -703,8 +713,24 @@ def build_index_html() -> str:
             </select>
           </div>
           <div>
-            <label for="aiModel">AI model</label>
-            <input id="aiModel" type="text" placeholder="gpt-4o by default with OpenAI">
+            <label for="aiModelPreset">AI model</label>
+            <select id="aiModelPreset">
+              <option value="">OpenAI default (`gpt-5.2`)</option>
+              <option value="gpt-5.2">gpt-5.2</option>
+              <option value="gpt-5.1">gpt-5.1</option>
+              <option value="gpt-4.1">gpt-4.1</option>
+              <option value="gpt-4o">gpt-4o</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </div>
+          <div id="customModelWrap" class="control-span" style="display:none">
+            <label for="aiModelCustom">Custom AI model</label>
+            <input id="aiModelCustom" type="text" placeholder="Enter an OpenAI model id" autocomplete="off">
+          </div>
+          <div class="control-span">
+            <label for="aiApiKey">OpenAI API key</label>
+            <input id="aiApiKey" type="password" placeholder="Paste a key for this run only" autocomplete="off">
+            <span class="control-note">Sent only with this run. The key stays in memory and is not written into reports or debug artifacts.</span>
           </div>
         </div>
 
@@ -835,6 +861,10 @@ def build_index_html() -> str:
     const dropzone = document.getElementById("dropzone");
     const runUploads = document.getElementById("runUploads");
     const runSample = document.getElementById("runSample");
+    const aiModelPreset = document.getElementById("aiModelPreset");
+    const aiModelCustom = document.getElementById("aiModelCustom");
+    const customModelWrap = document.getElementById("customModelWrap");
+    const aiApiKey = document.getElementById("aiApiKey");
     const statusPill = document.getElementById("runStatusPill");
     const statusMeta = document.getElementById("statusMeta");
 
@@ -860,7 +890,16 @@ def build_index_html() -> str:
       fileList.innerHTML = selectedFiles.map((file) => {
         const size = (file.size / 1024 / 1024).toFixed(2) + " MB";
         return `<li><span>${escapeHtml(file.name)}</span><span>${size}</span></li>`;
-      }).join("");
+        }).join("");
+    }
+
+    function updateModelControl() {
+      const isCustom = aiModelPreset.value === "custom";
+      customModelWrap.style.display = isCustom ? "block" : "none";
+      aiModelCustom.disabled = !isCustom;
+      if (!isCustom) {
+        aiModelCustom.value = "";
+      }
     }
 
     dropzone.addEventListener("click", () => fileInput.click());
@@ -1221,8 +1260,12 @@ def build_index_html() -> str:
       formData.append("ocr_mode", document.getElementById("ocrMode").value);
       formData.append("render_dpi", document.getElementById("renderDpi").value);
       formData.append("ai_mode", document.getElementById("aiMode").value);
-      const aiModelValue = document.getElementById("aiModel").value.trim();
+      const aiModelValue = aiModelPreset.value === "custom"
+        ? aiModelCustom.value.trim()
+        : aiModelPreset.value.trim();
       if (aiModelValue) formData.append("ai_model", aiModelValue);
+      const aiApiKeyValue = aiApiKey.value.trim();
+      if (aiApiKeyValue) formData.append("ai_api_key", aiApiKeyValue);
       if (useSample) {
         formData.append("use_sample", "1");
       } else {
@@ -1261,6 +1304,8 @@ def build_index_html() -> str:
 
     runUploads.addEventListener("click", () => createJob(false));
     runSample.addEventListener("click", () => createJob(true));
+    aiModelPreset.addEventListener("change", updateModelControl);
+    updateModelControl();
     renderStageGrid([]);
   </script>
 </body>
@@ -1369,7 +1414,14 @@ def _record_job_event(job: JobState, event: dict[str, Any]) -> None:
         )
 
 
-def _run_job(job: JobState, render_dpi: int, ocr_mode: str, ai_mode: str, ai_model: str | None) -> None:
+def _run_job(
+    job: JobState,
+    render_dpi: int,
+    ocr_mode: str,
+    ai_mode: str,
+    ai_model: str | None,
+    ai_api_key: str | None,
+) -> None:
     with job.lock:
         job.status = "running"
     _record_job_event(job, {"stage": "ingest", "status": "running", "summary": "Job started.", "details": {}})
@@ -1382,6 +1434,7 @@ def _run_job(job: JobState, render_dpi: int, ocr_mode: str, ai_mode: str, ai_mod
             ocr_mode=ocr_mode,
             ai_mode=ai_mode,
             ai_model=ai_model,
+            ai_api_key=ai_api_key,
             report_format="md",
             progress_callback=lambda event: _record_job_event(job, event),
         )
@@ -1428,7 +1481,12 @@ def _create_job_from_request(
     ocr_mode = fields.get("ocr_mode", "auto")
     ai_mode = fields.get("ai_mode", "auto")
     ai_model = fields.get("ai_model") or None
-    threading.Thread(target=_run_job, args=(job, render_dpi, ocr_mode, ai_mode, ai_model), daemon=True).start()
+    ai_api_key = fields.get("ai_api_key") or None
+    threading.Thread(
+        target=_run_job,
+        args=(job, render_dpi, ocr_mode, ai_mode, ai_model, ai_api_key),
+        daemon=True,
+    ).start()
     return job
 
 

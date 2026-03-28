@@ -16,6 +16,16 @@ def test_ai_resolver_records_fallback_when_endpoint_is_unavailable():
     assert resolver.decisions[0].fallback_used is True
 
 
+def test_ai_resolver_uses_settings_api_key_for_openai_detection(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    resolver = HybridAiResolver(AiSettings(mode="auto", api_key="test-key"))
+    provider, base_url, model = resolver._detect_provider()
+    assert provider == "openai_compat"
+    assert base_url == "https://api.openai.com/v1"
+    assert model == "gpt-5.2"
+
+
 def test_ai_resolver_uses_mocked_plan_choice(monkeypatch):
     resolver = HybridAiResolver(AiSettings(mode="auto"))
     page = DocumentPage(

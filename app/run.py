@@ -15,6 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ai", choices=["off", "auto", "require"], default="auto", help="AI ambiguity-resolution policy")
     parser.add_argument("--ai-model", default=None, help="Optional model name for the AI resolver")
     parser.add_argument("--ai-base-url", default=None, help="Optional OpenAI-compatible base URL for the AI resolver")
+    parser.add_argument("--ai-api-key", default=None, help="Optional API key for the AI resolver")
     parser.add_argument("--render-dpi", type=int, default=200, help="Raster DPI for rendered page images")
     parser.add_argument("--report-format", choices=["md"], default="md", help="Human-readable report format")
     return parser
@@ -39,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
             ai_mode=args.ai,
             ai_model=args.ai_model,
             ai_base_url=args.ai_base_url,
+            ai_api_key=args.ai_api_key,
             report_format=args.report_format,
         )
     except Exception as exc:  # pragma: no cover - top-level failure path

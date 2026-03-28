@@ -44,6 +44,7 @@ def run_pipeline(
     ai_mode: str = "auto",
     ai_model: str | None = None,
     ai_base_url: str | None = None,
+    ai_api_key: str | None = None,
     report_format: str = "md",
     progress_callback: ProgressCallback | None = None,
 ) -> PipelineArtifacts:
@@ -53,7 +54,9 @@ def run_pipeline(
     output_dir.mkdir(parents=True, exist_ok=True)
     debug_dir = output_dir / "debug"
     debug_dir.mkdir(parents=True, exist_ok=True)
-    ai_resolver = HybridAiResolver(AiSettings(mode=ai_mode, model=ai_model, base_url=ai_base_url))
+    ai_resolver = HybridAiResolver(
+        AiSettings(mode=ai_mode, model=ai_model, base_url=ai_base_url, api_key=ai_api_key)
+    )
 
     _emit(progress_callback, "ingest", "running", "Loading PDFs and extracting text/vector data.")
     pages = ingest_documents(input_dir=input_dir, output_dir=output_dir, render_dpi=render_dpi, ocr_mode=ocr_mode)
