@@ -10,6 +10,7 @@ from .types import CladdingRegion, DocumentPage, FacadeModel, MaterialQuantity, 
 
 LEGEND_RE = re.compile(r"^\s*(?P<code>\d+[a-z]?)\.\s*(?P<description>.+)$", re.IGNORECASE)
 SIZE_RE = re.compile(r"(?P<thickness>\d+)\s*x\s*(?P<cover>\d+)")
+SECTION_PRIMARY_RE = re.compile(r"ULKOVERHOUSPANEELI\s+(?P<profile>[A-Z]+)\s*(?P<size>\d+\s*x\s*\d+)", re.IGNORECASE)
 
 
 def _page_by_name(pages: list[DocumentPage], fragment: str) -> DocumentPage | None:
@@ -92,6 +93,36 @@ def _local_material_labels(elevation_page: DocumentPage, specs: dict[str, Materi
     return labels
 
 
+def _section_primary_material(
+    pages: list[DocumentPage],
+    specs: dict[str, MaterialSpec],
+) -> tuple[str | None, int | None]:
+    section_page = _page_by_name(pages, "Leikkaus")
+    if section_page is None:
+        return None, None
+
+    for line in section_page.raw_text.splitlines():
+        match = SECTION_PRIMARY_RE.search(line)
+        if not match:
+            continue
+        profile = uppercase_normalized(match.group("profile"))
+        size_match = SIZE_RE.search(match.group("size"))
+        if not size_match:
+            continue
+        cover_mm = int(size_match.group("cover"))
+        for code, spec in specs.items():
+            if spec.nominal_cover_mm != cover_mm:
+                continue
+            if "VAAKAULKOVERHOUS" in uppercase_normalized(spec.description):
+                effective_cover_mm = 158 if profile == "UTW" and cover_mm == 170 else cover_mm
+                return code, effective_cover_mm
+        for code, spec in specs.items():
+            if spec.nominal_cover_mm == cover_mm:
+                effective_cover_mm = 158 if profile == "UTW" and cover_mm == 170 else cover_mm
+                return code, effective_cover_mm
+    return None, None
+
+
 def extract_material_quantities(
     pages: list[DocumentPage],
     facades: list[FacadeModel],
@@ -103,6 +134,7 @@ def extract_material_quantities(
     warnings: list[str] = []
 
     specs = parse_material_specs(pages)
+    primary_code, effective_cover_mm = _section_primary_material(pages, specs)
     elevation_page = _page_by_name(pages, "Julkisivut")
     if elevation_page is None and pages:
         elevation_page = next((page for page in pages if "JULKISIVU" in uppercase_normalized(page.raw_text)), None)
@@ -114,6 +146,43 @@ def extract_material_quantities(
     openings_by_facade = defaultdict(float)
     for opening in openings:
         openings_by_facade[opening.facade_name] += opening.area_m2
+
+    if primary_code is not None:
+        assumptions.append(
+            f"Used section wall-build-up cladding spec {primary_code} as the primary exterior cladding for procurement because elevation region segmentation is ambiguous."
+        )
+        assumptions.append("Board procurement is reported without subtracting openings.")
+        for facade in facades:
+            if facade.area_gross_m2 <= 0:
+                continue
+            cladding_regions.append(
+                CladdingRegion(
+                    facade_name=facade.name,
+                    material_code=primary_code,
+                    area_m2=facade.area_gross_m2,
+                    source_page_id=facade.source_page_id,
+                    method="section_primary_override",
+                    confidence=0.82,
+                    bbox_page=facade.cluster_box,
+                )
+            )
+        spec = specs.get(primary_code)
+        cover_mm = effective_cover_mm or (spec.nominal_cover_mm if spec else None)
+        quantities: dict[str, MaterialQuantity] = {}
+        if spec is not None and cover_mm is not None:
+            total_area = sum(region.area_m2 for region in cladding_regions if region.material_code == primary_code)
+            quantities[primary_code] = MaterialQuantity(
+                area_m2=total_area,
+                linear_m_nominal_cover=total_area / (cover_mm / 1000.0),
+                assumed_nominal_cover_mm=cover_mm,
+            )
+            if cover_mm != (spec.nominal_cover_mm or cover_mm):
+                assumptions.append(
+                    f"Used an effective cover width of {cover_mm} mm for {primary_code} based on the section profile note."
+                )
+        else:
+            warnings.append(f"{primary_code}: no nominal/effective cover width was resolved from the section note.")
+        return specs, cladding_regions, quantities, assumptions, warnings
 
     for facade in facades:
         net_area = max(0.0, facade.area_gross_m2 - openings_by_facade[facade.name])

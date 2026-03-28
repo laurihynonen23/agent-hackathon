@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import statistics
-from pathlib import Path
+from collections import defaultdict, Counter
+import re
 
 import numpy as np
 from shapely.geometry import Polygon
@@ -127,6 +127,37 @@ def _largest_dimension_by_orientation(
     return max(candidates)
 
 
+def _chain_dimension_sum(
+    store: MeasurementStore,
+    page_id: str,
+    plan_region: BBox,
+    orientation: str,
+) -> float | None:
+    bucket_size = 15.0
+    groups: dict[int, list[float]] = defaultdict(list)
+    for measurement in measurements_for_page(store, page_id):
+        if measurement.kind != "dimension_mm":
+            continue
+        if measurement.orientation != orientation:
+            continue
+        if measurement.value_m < 0.9:
+            continue
+        if not measurement.bbox.intersects(plan_region.expand(260.0)):
+            continue
+        anchor = measurement.bbox.y0 if orientation == "horizontal" else measurement.bbox.x0
+        bucket = int(round(anchor / bucket_size))
+        groups[bucket].append(measurement.value_m)
+
+    chain_sums = [
+        round(sum(values), 3)
+        for values in groups.values()
+        if len(values) >= 2
+    ]
+    if not chain_sums:
+        return None
+    return max(chain_sums)
+
+
 def _fallback_dimensions_from_any(store: MeasurementStore, page_id: str) -> tuple[float | None, float | None]:
     candidates = sorted(
         {
@@ -150,6 +181,28 @@ def build_rectangular_footprint(width_m: float, depth_m: float) -> Polygon:
 def gable_wall_area(width_m: float, eave_height_m: float, total_height_m: float) -> float:
     ridge_extra = max(0.0, total_height_m - eave_height_m)
     return width_m * eave_height_m + 0.5 * width_m * ridge_extra
+
+
+def _preferred_wall_height_m(
+    measurements: MeasurementStore,
+    candidate_page_ids: list[str],
+) -> float | None:
+    values: list[float] = []
+    for page_id in candidate_page_ids:
+        for measurement in measurements_for_page(measurements, page_id):
+            if measurement.kind != "level_marker":
+                continue
+            if measurement.value_m < 2.5 or measurement.value_m > 5.5:
+                continue
+            values.append(round(measurement.value_m, 3))
+    if not values:
+        return None
+
+    counts = Counter(values)
+    best_value, best_count = max(counts.items(), key=lambda item: (item[1], -abs(item[0] - 4.0)))
+    if best_count >= 2:
+        return best_value
+    return float(np.median(values))
 
 
 def _line_text(page: DocumentPage, block_no: int, line_no: int) -> str:
@@ -233,8 +286,12 @@ def reconstruct_geometry(
         raise RuntimeError("No plan sheet was classified. Geometry reconstruction requires a plan.")
 
     plan_region = detect_primary_plan_region(plan_page)
-    width_m = _largest_dimension_by_orientation(measurements, plan_page.page_id, plan_region, "horizontal")
-    depth_m = _largest_dimension_by_orientation(measurements, plan_page.page_id, plan_region, "vertical")
+    width_m = _chain_dimension_sum(measurements, plan_page.page_id, plan_region, "horizontal")
+    depth_m = _chain_dimension_sum(measurements, plan_page.page_id, plan_region, "vertical")
+    if width_m is None:
+        width_m = _largest_dimension_by_orientation(measurements, plan_page.page_id, plan_region, "horizontal")
+    if depth_m is None:
+        depth_m = _largest_dimension_by_orientation(measurements, plan_page.page_id, plan_region, "vertical")
     if width_m is None or depth_m is None:
         fallback_width, fallback_depth = _fallback_dimensions_from_any(measurements, plan_page.page_id)
         width_m = width_m or fallback_width
@@ -245,19 +302,31 @@ def reconstruct_geometry(
         raise RuntimeError("Could not detect overall building dimensions from the plan.")
 
     footprint_polygon = build_rectangular_footprint(width_m, depth_m)
+    section_page = _page_for_role(pages, classifications, "section")
+    elevation_page = _page_for_role(pages, classifications, "elevations")
+    wall_height_m = _preferred_wall_height_m(
+        measurements,
+        [page_id for page_id in [section_page.page_id if section_page else None, elevation_page.page_id if elevation_page else None] if page_id],
+    )
+    if wall_height_m is None:
+        wall_height_m = 4.0
+        warnings.append("No repeated exterior wall height marker was found; using a 4.0 m fallback wall height.")
+    else:
+        assumptions.append(
+            f"Exterior wall surface uses the repeated section/elevation wall-height marker {wall_height_m:.3f} m."
+        )
+
     footprint = FootprintModel(
         width_m=width_m,
         depth_m=depth_m,
         polygon=[Point2D(x=float(x), y=float(y)) for x, y in footprint_polygon.exterior.coords[:-1]],
         perimeter_m=float(footprint_polygon.length),
         source_page_id=plan_page.page_id,
-        source_strategy="plan_dimension_chain_rectangle",
+        source_strategy="plan_outer_dimension_chain_rectangle",
         confidence=0.8 if plan_region.width < plan_page.width_pt else 0.7,
         plan_bbox=plan_region,
     )
 
-    elevation_page = _page_for_role(pages, classifications, "elevations")
-    section_page = _page_for_role(pages, classifications, "section")
     facades: list[FacadeModel] = []
 
     if elevation_page is not None:
@@ -270,49 +339,26 @@ def reconstruct_geometry(
         long_dimension = max(width_m, depth_m)
         short_dimension = min(width_m, depth_m)
         long_cluster_names = {name for name, _ in sorted_clusters[:2]}
-        height_candidates = []
-        assigned_meta: list[tuple[str, BBox, float, float]] = []
+        assigned_meta: list[tuple[str, BBox, float]] = []
         for name, cluster_box in cluster_candidates:
             assigned_width_m = long_dimension if name in long_cluster_names else short_dimension
-            px_per_m = cluster_box.width / assigned_width_m if assigned_width_m > 0 else 0.0
-            total_height_m = cluster_box.height / px_per_m if px_per_m > 0 else 0.0
-            assigned_meta.append((name, cluster_box, assigned_width_m, total_height_m))
-            if name in long_cluster_names and total_height_m > 0:
-                height_candidates.append(total_height_m)
+            assigned_meta.append((name, cluster_box, assigned_width_m))
 
-        long_height_m = float(np.median(height_candidates)) if height_candidates else None
-        if long_height_m is None and section_page is not None:
-            levels = _section_level_candidates(measurements, section_page.page_id)
-            if levels:
-                long_height_m = levels[-2] if len(levels) >= 2 else levels[-1]
-                assumptions.append("Used section levels as a fallback for eave height.")
-        if long_height_m is None:
-            long_height_m = 2.8
-            assumptions.append("Used a conservative fallback eave height because facade scaling was incomplete.")
-
-        for name, cluster_box, assigned_width_m, total_height_m in assigned_meta:
-            is_gable = assigned_width_m == short_dimension and total_height_m > long_height_m * 1.08
-            if is_gable:
-                gross_area = gable_wall_area(assigned_width_m, long_height_m, total_height_m)
-                ridge_height_m = total_height_m
-                eave_height_m = long_height_m
-            else:
-                gross_area = assigned_width_m * max(total_height_m, long_height_m if assigned_width_m == long_dimension else total_height_m)
-                ridge_height_m = None
-                eave_height_m = total_height_m if assigned_width_m == long_dimension else long_height_m
+        for name, cluster_box, assigned_width_m in assigned_meta:
+            gross_area = assigned_width_m * wall_height_m
 
             facades.append(
                 FacadeModel(
                     name=name,
                     width_m=assigned_width_m,
-                    total_height_m=total_height_m,
-                    eave_height_m=eave_height_m,
-                    ridge_height_m=ridge_height_m,
+                    total_height_m=wall_height_m,
+                    eave_height_m=wall_height_m,
+                    ridge_height_m=None,
                     area_gross_m2=gross_area,
                     cluster_box=cluster_box,
                     source_page_id=elevation_page.page_id,
-                    confidence=0.78 if total_height_m > 0 else 0.45,
-                    is_gable=is_gable,
+                    confidence=0.84,
+                    is_gable=False,
                     assigned_dimension_kind="long" if assigned_width_m == long_dimension else "short",
                 )
             )
@@ -320,63 +366,60 @@ def reconstruct_geometry(
         warnings.append("No elevation page was classified; using section-based rectangular facade fallback.")
 
     if not facades:
-        section_levels = _section_level_candidates(measurements, section_page.page_id) if section_page is not None else []
-        ridge_height_m = max(section_levels) if section_levels else 5.5
-        eave_height_m = section_levels[-2] if len(section_levels) >= 2 else ridge_height_m * 0.7
-        assumptions.append("Facade heights were reconstructed from section levels because elevation clustering was unavailable.")
         facades = [
             FacadeModel(
                 name="FACADE A",
                 width_m=max(width_m, depth_m),
-                total_height_m=eave_height_m,
-                eave_height_m=eave_height_m,
+                total_height_m=wall_height_m,
+                eave_height_m=wall_height_m,
                 ridge_height_m=None,
-                area_gross_m2=max(width_m, depth_m) * eave_height_m,
+                area_gross_m2=max(width_m, depth_m) * wall_height_m,
                 cluster_box=BBox(x0=0, y0=0, x1=0, y1=0),
                 source_page_id=section_page.page_id if section_page else plan_page.page_id,
-                confidence=0.45,
+                confidence=0.55,
                 is_gable=False,
                 assigned_dimension_kind="long",
             ),
             FacadeModel(
                 name="FACADE B",
                 width_m=max(width_m, depth_m),
-                total_height_m=eave_height_m,
-                eave_height_m=eave_height_m,
+                total_height_m=wall_height_m,
+                eave_height_m=wall_height_m,
                 ridge_height_m=None,
-                area_gross_m2=max(width_m, depth_m) * eave_height_m,
+                area_gross_m2=max(width_m, depth_m) * wall_height_m,
                 cluster_box=BBox(x0=0, y0=0, x1=0, y1=0),
                 source_page_id=section_page.page_id if section_page else plan_page.page_id,
-                confidence=0.45,
+                confidence=0.55,
                 is_gable=False,
                 assigned_dimension_kind="long",
             ),
             FacadeModel(
                 name="FACADE C",
                 width_m=min(width_m, depth_m),
-                total_height_m=ridge_height_m,
-                eave_height_m=eave_height_m,
-                ridge_height_m=ridge_height_m,
-                area_gross_m2=gable_wall_area(min(width_m, depth_m), eave_height_m, ridge_height_m),
+                total_height_m=wall_height_m,
+                eave_height_m=wall_height_m,
+                ridge_height_m=None,
+                area_gross_m2=min(width_m, depth_m) * wall_height_m,
                 cluster_box=BBox(x0=0, y0=0, x1=0, y1=0),
                 source_page_id=section_page.page_id if section_page else plan_page.page_id,
-                confidence=0.4,
-                is_gable=True,
+                confidence=0.55,
+                is_gable=False,
                 assigned_dimension_kind="short",
             ),
             FacadeModel(
                 name="FACADE D",
                 width_m=min(width_m, depth_m),
-                total_height_m=ridge_height_m,
-                eave_height_m=eave_height_m,
-                ridge_height_m=ridge_height_m,
-                area_gross_m2=gable_wall_area(min(width_m, depth_m), eave_height_m, ridge_height_m),
+                total_height_m=wall_height_m,
+                eave_height_m=wall_height_m,
+                ridge_height_m=None,
+                area_gross_m2=min(width_m, depth_m) * wall_height_m,
                 cluster_box=BBox(x0=0, y0=0, x1=0, y1=0),
                 source_page_id=section_page.page_id if section_page else plan_page.page_id,
-                confidence=0.4,
-                is_gable=True,
+                confidence=0.55,
+                is_gable=False,
                 assigned_dimension_kind="short",
             ),
         ]
+        assumptions.append("Facade widths use the outer dimension-chain rectangle and wall height uses repeated section/elevation markers.")
 
     return footprint, facades, assumptions, warnings

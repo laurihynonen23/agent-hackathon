@@ -16,9 +16,11 @@ def test_cli_smoke(tmp_path: Path):
     assert exit_code == 0
 
     results = json.loads((output_dir / "results.json").read_text(encoding="utf-8"))
-    assert results["perimeter_exterior_m"] > 0
-    assert results["gross_outer_wall_area_m2"] > 0
+    assert results["perimeter_exterior_m"] == pytest.approx(59.43, abs=0.01)
+    assert results["gross_outer_wall_area_m2"] == pytest.approx(238.53, abs=0.15)
     assert "confidence" in results
+    assert list(results["cladding_by_type"]) == ["3a"]
+    assert results["cladding_by_type"]["3a"]["linear_m_nominal_cover"] == pytest.approx(1509.0, abs=2.0)
 
     debug_dir = output_dir / "debug"
     overlays_dir = output_dir / "overlays"
@@ -40,7 +42,8 @@ def test_pipeline_emits_progress_events(tmp_path: Path):
         output_dir=output_dir,
         progress_callback=events.append,
     )
-    assert artifacts.results.perimeter_exterior_m > 0
+    assert artifacts.results.perimeter_exterior_m == pytest.approx(59.43, abs=0.01)
+    assert artifacts.results.gross_outer_wall_area_m2 == pytest.approx(238.53, abs=0.15)
     stages = [event["stage"] for event in events if event["status"] == "completed"]
     assert "ingest" in stages
     assert "classify" in stages

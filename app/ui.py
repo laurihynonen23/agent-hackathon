@@ -88,6 +88,7 @@ def build_index_html() -> str:
         radial-gradient(circle at bottom right, rgba(210, 106, 27, 0.15), transparent 20%),
         linear-gradient(180deg, var(--bg), var(--bg-deep));
       min-height: 100vh;
+      overflow-x: hidden;
     }
     body::before {
       content: "";
@@ -101,7 +102,7 @@ def build_index_html() -> str:
       mask-image: linear-gradient(180deg, rgba(0,0,0,0.4), transparent 85%);
     }
     .shell {
-      max-width: 1500px;
+      width: min(100%, 1460px);
       margin: 0 auto;
       padding: 28px 24px 56px;
       position: relative;
@@ -109,7 +110,7 @@ def build_index_html() -> str:
     }
     .hero {
       display: grid;
-      grid-template-columns: 1.15fr 0.85fr;
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
       gap: 18px;
       align-items: stretch;
       margin-bottom: 22px;
@@ -178,14 +179,18 @@ def build_index_html() -> str:
     }
     .layout {
       display: grid;
-      grid-template-columns: 410px 1fr;
+      grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
       gap: 18px;
+      align-items: start;
     }
     .controls {
       padding: 22px;
       position: sticky;
       top: 18px;
       align-self: start;
+    }
+    .hero-main, .hero-side, .controls, .workspace, .panel, .block, .status-strip, .stage-card, .metric, .overlay-card {
+      min-width: 0;
     }
     .section-title {
       margin: 0 0 10px;
@@ -281,6 +286,7 @@ def build_index_html() -> str:
     .workspace {
       display: grid;
       gap: 18px;
+      min-width: 0;
     }
     .status-strip {
       padding: 18px 22px;
@@ -338,7 +344,7 @@ def build_index_html() -> str:
     .stage-card.failed { border-color: rgba(168, 63, 51, 0.38); }
     .metrics {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 12px;
     }
     .metric {
@@ -361,7 +367,7 @@ def build_index_html() -> str:
     }
     .content-grid {
       display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
       gap: 18px;
     }
     .block {
@@ -437,6 +443,7 @@ def build_index_html() -> str:
     }
     table {
       width: 100%;
+      table-layout: fixed;
       border-collapse: collapse;
       font-size: 0.9rem;
     }
@@ -445,6 +452,8 @@ def build_index_html() -> str:
       border-bottom: 1px solid rgba(24,22,26,0.08);
       text-align: left;
       vertical-align: top;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     th {
       color: var(--muted);
@@ -485,10 +494,13 @@ def build_index_html() -> str:
       background: #1d1d1f;
       color: #f8f0e3;
       border-radius: 18px;
-      overflow: auto;
+      overflow-x: hidden;
       font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
       font-size: 0.8rem;
       line-height: 1.55;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .empty-state {
       padding: 24px;
@@ -502,8 +514,17 @@ def build_index_html() -> str:
       max-height: 520px;
       overflow: auto;
     }
+    .split-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
     .status-ok { color: var(--green); }
     .status-bad { color: var(--red); }
+    @media (max-width: 1280px) {
+      .layout { grid-template-columns: minmax(300px, 340px) minmax(0, 1fr); }
+      .metrics, .stage-grid, .overlay-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
     @media (max-width: 1200px) {
       .hero, .layout, .content-grid { grid-template-columns: 1fr; }
       .controls { position: static; }
@@ -511,7 +532,7 @@ def build_index_html() -> str:
     }
     @media (max-width: 760px) {
       .shell { padding: 16px; }
-      .metrics, .stage-grid, .overlay-grid, .controls-grid { grid-template-columns: 1fr; }
+      .metrics, .stage-grid, .overlay-grid, .controls-grid, .split-grid { grid-template-columns: 1fr; }
       .button-row { flex-direction: column; }
       button { width: 100%; }
     }
@@ -836,15 +857,22 @@ def build_index_html() -> str:
           metricCard("Perimeter", "--"),
           metricCard("Gross Wall Area", "--"),
           metricCard("Openings", "--"),
-          metricCard("Net Cladding", "--")
+          metricCard("Net Cladding", "--"),
+          metricCard("Board Takeoff", "--")
         ].join("");
         return;
       }
+      const quantities = Object.entries(results.cladding_by_type || {});
+      const primaryQuantity = quantities.sort((left, right) => right[1].linear_m_nominal_cover - left[1].linear_m_nominal_cover)[0];
+      const takeoffValue = primaryQuantity
+        ? `${primaryQuantity[1].linear_m_nominal_cover.toFixed(0)} lm · ${primaryQuantity[0]}`
+        : "--";
       grid.innerHTML = [
         metricCard("Perimeter", results.perimeter_exterior_m.toFixed(2) + " m"),
         metricCard("Gross Wall Area", results.gross_outer_wall_area_m2.toFixed(2) + " m²"),
         metricCard("Openings", results.openings_area_m2.toFixed(2) + " m²"),
-        metricCard("Net Cladding", results.net_cladding_area_m2.toFixed(2) + " m²")
+        metricCard("Net Cladding", results.net_cladding_area_m2.toFixed(2) + " m²"),
+        metricCard("Board Takeoff", takeoffValue)
       ].join("");
     }
 
@@ -928,7 +956,7 @@ def build_index_html() -> str:
       const warnings = (summary.results.warnings || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("") || "<li>None</li>";
       block.className = "";
       block.innerHTML = `
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div class="split-grid">
           <div>
             <div class="section-title" style="font-size:1rem; margin-bottom:8px">Assumptions</div>
             <ul class="list">${assumptions}</ul>
